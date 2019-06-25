@@ -4,6 +4,7 @@ import {
 	View,
 	TextInput,
 	ScrollView,
+	Alert,
 	TouchableOpacity,
 } from 'react-native';
 
@@ -14,7 +15,7 @@ import _ from 'lodash'
 import DateTimePicker from "react-native-modal-datetime-picker";
 
 //offline local storage
-import AsyncStorage from '@react-native-community/async-storage';
+import SQLite from "react-native-sqlite-storage"
 
 //icons import
 import Icon_1 from 'react-native-vector-icons/Entypo'
@@ -24,19 +25,213 @@ class Main extends Component<>{
 
 	constructor(props) {
 		super(props);
+		const db = SQLite.openDatabase(
+			{name:'test.db', createFromLocation:'~notesData.db'},
+			() => {},
+			error => {console.log(error);}
+		);
 		this.state= {
+			db,
 			isVisible: false,
-			chosenDate: '',
 			noteArray: [],
+			noteDate:'',
 			noteText: '',
-			item: []
+			noteDeadline:''
 		}
+
+	}
+
+	render() { 
+
+		const { noteArray } = this.state;
+
+		let notes = noteArray.map((val, key)=> { 
+					return <Note 
+						key={key} 
+						keyval={key}
+						val={val}
+						deleteMethod={ ()=> this.deleteNote(key) } />
+					});
+
+		return (
+			<View style={styles.container}>
+
+				<View style={styles.header}>
+				  <Text style={styles.headerText}>Tasks</Text>
+				  <TouchableOpacity
+				  	onPress={() => Alert.alert(
+					          'Delete all tasks?',
+					          'Deleteing all tasks will clear every tasks stored',
+					          [
+					          	{text: 'Yes', onPress: this.clearData},
+					            {text: 'No', onPress: () => console.log('Delete all canceled'),style: 'cancel'}
+					          ],
+					          { cancelable: false }
+					        )}
+				  	style={styles.delButton}>
+				    <Icon_2 name='delete-sweep' size={20} color="#8A8867" />
+				  </TouchableOpacity>
+				</View>
+
+				<ScrollView style={styles.scrollContainer}>				
+					{notes}
+				</ScrollView>
+
+				<View style={styles.footer}>
+				  <TextInput 											//addNoteField
+				    style={styles.textInput}
+				    onChangeText={(noteText)=>this.setState({noteText})}
+				    value={this.state.noteText}
+				    placeholder='Add note'
+				    placeholderTextColor='white'
+				    underlineColorAndroid='transparent'>
+				  </TextInput>
+				</View>
+
+				<TouchableOpacity     									//deadlineButton
+				  onPress={this.selectDateTime} 
+				  style={this.state.noteDeadline==''?styles.addDeadline_notSet:styles.addDeadline_Set}>
+				  <Text style={styles.addDeadlineText}>Deadline</Text>
+				</TouchableOpacity>
+				<DateTimePicker
+				  isVisible={this.state.isVisible}
+				  onConfirm={this.handlePicker}
+				  onCancel={this.hidePicker}
+				  mode={'datetime'}
+				  is24Hour={false}
+				/>
+
+				<TouchableOpacity										//storeButton
+				  onPress={this.storeData.bind(this)}
+				  style={styles.addButton}>
+				  <Icon_1 name='add-to-list' size={28} color="white" />
+				</TouchableOpacity>
+
+			</View>
+		);
+	}
+
+	componentDidMount() {
+		const { db } = this.state;
+		db.transaction(tx => {
+			tx.executeSql('SELECT * FROM tasks;', [], (tx, results) => {
+				const rows = results.rows;
+				let noteArray = [];
+		        for (let i = 0; i < rows.length; i++) {
+		          noteArray.push({
+		            ...rows.item(i),
+		          });
+		        }
+		        this.setState({ noteArray });
+		    });
+		});
+	}
+
+  	componentWillUnmount() {
+  	    const { db } = this.state;
+  	    db.close();
+  	}
+
+	
+	storeData=() => {
+		const { db } = this.state;
+		const { noteText } = this.state;
+
+		if (this.state.noteDeadline!='') {
+			if(this.state.noteText) {
+
+				var d = new Date();
+				this.state.noteDate=JSON.parse(JSON.stringify("Date Added: "+d.getHours()+":"+d.getMinutes()+" "+d.getDate()+"/"+(d.getMonth()+1)+"/"+d.getFullYear()))
+				let temp=JSON.parse(JSON.stringify(this.state.noteDeadline))
+
+				db.transaction(tx => {
+					tx.executeSql(
+						'INSERT INTO tasks (date, note, deadline) VALUES (?,?,?)',
+						[this.state.noteDate, noteText,"Deadline: "+temp],
+						(tx, results) => {
+							console.log('Added rows ->', results.rowsAffected);
+					});
+				});
+
+				db.transaction(tx => {
+					tx.executeSql('SELECT * FROM tasks;', [], (tx, results) => {
+						const rows = results.rows;
+						let noteArray = [];
+				        for (let i = 0; i < rows.length; i++) {
+				          noteArray.push({
+				            ...rows.item(i),
+				          });
+				        }
+				        this.setState({ noteArray });
+				    });
+				});				
+
+				this.setState({ noteText: ''})
+				this.setState({ noteDeadline: ''})
+			}
+		}
+		else {
+			alert('Please select Deadline')
+		}
+	}
+
+	deleteNote=(key) => {
+
+		const { db } = this.state;
+		const { noteArray } = this.state;
+
+		db.transaction(tx => {
+			tx.executeSql(
+				'DELETE FROM  tasks where id=?', [noteArray[key].id],(tx, results) => {
+					console.log('Deleted rows ->', results.rowsAffected);
+			});
+		});
+
+		db.transaction(tx => {
+			tx.executeSql('SELECT * FROM tasks;', [], (tx, results) => {
+				const rows = results.rows;
+				let noteArray = [];
+		        for (let i = 0; i < rows.length; i++) {
+		          noteArray.push({
+		            ...rows.item(i),
+		          });
+		        }
+		        this.setState({ noteArray });
+		    });
+		});
+
+	}
+
+	clearData=() => {
+
+		const { db } = this.state;
+
+		db.transaction(tx => {
+			tx.executeSql(
+				'DELETE FROM  tasks', [],(tx, results) => {
+					console.log('Deleted rows ->', results.rowsAffected);
+			});
+		});
+
+		db.transaction(tx => {
+			tx.executeSql('SELECT * FROM tasks;', [], (tx, results) => {
+				const rows = results.rows;
+				let noteArray = [];
+		        for (let i = 0; i < rows.length; i++) {
+		          noteArray.push({
+		            ...rows.item(i),
+		          });
+		        }
+		        this.setState({ noteArray });
+		    });
+		});
+
 	}
 
 	handlePicker=(datetime)=> {
 		this.setState({
 			isVisible: false,
-			chosenDate: moment(datetime).format('HH:mm DD/MM/YYYY')
+			noteDeadline: moment(datetime).format('HH:mm DD/MM/YYYY')
 		})
 	}
 	selectDateTime=()=> {
@@ -50,118 +245,6 @@ class Main extends Component<>{
 		})
 	}
 
-	async componentWillMount() {
-
-		item: JSON.parse(await AsyncStorage.getItem("mylist"))
-		noteArray: JSON.parse(await AsyncStorage.getItem("mylist"))
-		if(this.state.item!=null) { this.setState({ item, noteArray }) }
-		else {
-			this.state.noteArray.push({
-			'date':"Sample Date 1",
-			'note':"Sample Note 1",
-			'deadline':"Sample Deadline 1"
-		});
-		await AsyncStorage.setItem("mylist",JSON.stringify(this.state.noteArray))
-		this.setState({ item: JSON.parse(await AsyncStorage.getItem("mylist"))})
-		//this.state.noteArray= JSON.parse(await AsyncStorage.getItem("mylist"))
-		}
-	}
-
-	render() { 
-	console.log("render")	
-	console.log(this.state)
-
-		let notes = this.state.item.map((val,key)=> { return <Note 
-						key={key} 
-						keyval={key}
-						val={val}
-						deleteMethod={ ()=> this.deleteNote(key) } />
-					});
-
-		return (
-			<View style={styles.container}>
-
-				<View style={styles.header}>
-				  <Text style={styles.headerText}>Tasks</Text>
-				  <TouchableOpacity
-				  	onPress={this.clearAsyncStorage}
-				  	style={styles.delButton}>
-				    <Icon_2 name='delete-sweep' size={20} color="#8A8867" />
-				  </TouchableOpacity>
-				</View>
-
-				<ScrollView style={styles.scrollContainer}>
-					{notes}
-				</ScrollView>
-
-				<View style={styles.footer}>
-				  <TextInput
-				    style={styles.textInput}
-				    onChangeText={(noteText)=>this.setState({noteText})}
-				    value={this.state.noteText}
-				    placeholder='Add note'
-				    placeholderTextColor='white'
-				    underlineColorAndroid='transparent'>
-				  </TextInput>
-				</View>
-
-				<TouchableOpacity 
-				  onPress={this.selectDateTime} 
-				  style={this.state.chosenDate==''?styles.addDeadline_notSet:styles.addDeadline_Set}>
-				  <Text style={styles.addDeadlineText}>Deadline</Text>
-				</TouchableOpacity>
-				<DateTimePicker
-				  isVisible={this.state.isVisible}
-				  onConfirm={this.handlePicker}
-				  onCancel={this.hidePicker}
-				  mode={'datetime'}
-				  is24Hour={false}
-				/>
-
-				<TouchableOpacity
-				  onPress={this.storedata}
-				  style={styles.addButton}>
-				  <Icon_1 name='add-to-list' size={28} color="white" />
-				</TouchableOpacity>
-
-			</View>
-		);
-	}
-
-	
-	storedata=async()=>{
-		if (this.state.chosenDate!='') {
-			console.log("b_push")	
-	        console.log(this.state)
-			if(this.state.noteText) {
-				var d = new Date();
-				this.state.noteArray.push({
-					'date': "Date Added: "+d.getHours()+":"+d.getMinutes()+" "+d.getDate()+"/"+(d.getMonth()+1)+"/"+d.getFullYear(),
-					'note': this.state.noteText,
-					'deadline': "Deadline: "+this.state.chosenDate
-				});
-				await AsyncStorage.setItem("mylist",JSON.stringify(this.state.noteArray))
-				this.setState({ item: JSON.parse(await AsyncStorage.getItem("mylist")) })
-				console.log("a_push")	
-	            console.log(this.state)
-				//this.setState({ noteArray: this.state.noteArray})
-				this.setState({ noteText: ''})
-				this.setState({ chosenDate: ''})
-			}
-		}
-		else {
-			alert('Please select Deadline')
-		}
-	}
-
-	async deleteNote(key) {
-		this.state.noteArray.splice(key, 1);
-		await AsyncStorage.setItem("mylist",JSON.stringify(this.state.noteArray))
-		this.setState({ item: JSON.parse(await AsyncStorage.getItem("mylist")) })
-		//this.setState({ noteArray: this.state.noteArray})
-	}
-
-	clearAsyncStorage=async()=> { AsyncStorage.clear(); }
 }
 
 export default Main
